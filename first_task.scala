@@ -2,15 +2,31 @@
 import java.sql.Timestamp
 import java.net.{URI, URISyntaxException}
 
-
+import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.{Dataset, Encoders}
+import org.apache.spark.sql.{Dataset, Encoders, SaveMode}
 import org.apache.spark.sql.types.DateType
 import org.jsoup.Jsoup
+import org.jsoup.select.Elements
+
+import reflect.runtime.universe.TypeTag
+
+import spark.implicits._ 
 
 
-import spark.implicits._ //!!!
+// COMMAND ----------
 
+def readDs[T <: Product : TypeTag](filename: String): Dataset[T] = {
+    spark.read
+      .option("multiLine", true)
+      .option("header", true)
+      .schema(Encoders.product[T].schema)
+      .option("escape", "\"")
+      .csv("/FileStore/tables/" + filename)
+      .na.drop("all")
+      .as[T]
+      .cache()
+}
 
 // COMMAND ----------
 
@@ -21,16 +37,7 @@ case class Question(id: Long,
                     title: String,
                     body: String)
 
-val questionsDs = spark.read
-      .option("multiLine", true)
-      .option("header", true)
-      .schema(Encoders.product[Question].schema)
-      .option("escape", "\"")
-      .csv("/FileStore/tables/Questions.csv")
-      .na.drop("all")
-      .as[Question]
-      
-questionsDs.cache()
+val questionsDs = readDs[Question]("Questions.csv")
 
 
 // COMMAND ----------
@@ -42,32 +49,14 @@ case class Answer(id: Long,
                   score: Long,
                   body: String)
 
-val answersDs = spark.read
-      .option("multiLine", true)
-      .option("header", true)
-      .schema(Encoders.product[Answer].schema)
-      .option("escape", "\"")
-      .csv("/FileStore/tables/Answers.csv")
-      .na.drop("all")
-      .as[Answer]
-
-answersDs.cache()
+val answersDs =  readDs[Answer]("Answers.csv")
 
 // COMMAND ----------
 
 case class Tag(id: Long,
                tag: String)
 
-val tagsDs = spark.read
-      .option("multiLine", true)
-      .option("header", true)
-      .schema(Encoders.product[Tag].schema)
-      .option("escape", "\"")
-      .csv("/FileStore/tables/Tags.csv")
-      .na.drop("all")
-      .as[Tag]
-
-tagsDs.cache()
+val tagsDs = readDs[Tag]("Tags.csv")
 
 // COMMAND ----------
 
@@ -77,25 +66,25 @@ tagsDs.cache()
 // COMMAND ----------
 
 val questionNaFreeDs = questionsDs
-      .withColumn("creationDate", col("creationDate").cast(DateType))
+      .withColumn("creationDate", $"creationDate".cast(DateType))
       .na.drop(Seq("creationDate"))
 val answersNaFreeDs = answersDs
-  .withColumn("creationDate", col("creationDate").cast(DateType))
+  .withColumn("creationDate", $"creationDate".cast(DateType))
   .na.drop(Seq("creationDate"))
 
 val questionCols = Seq(
   lit(null).alias("answerId"),
-  col("ownerUserId"),
-  col("creationDate").cast(DateType),
-  col("id").alias("questionId")
+  $"ownerUserId",
+  $"creationDate".cast(DateType),
+  $"id".alias("questionId")
 )
 val answerCols = Seq(
-  col("id").alias("answerId"),
-  col("ownerUserId"),
-  col("creationDate").cast(DateType),
+  $"id".alias("answerId"),
+  $"ownerUserId",
+  $"creationDate".cast(DateType),
   lit(null).alias("questionId")
 )
-val unionDf = questionNaFreeDs.select(questionCols: _*).unionAll(answersNaFreeDs.select(answerCols: _ *))
+val unionDf = questionNaFreeDs.select(questionCols: _*).unionByName(answersNaFreeDs.select(answerCols: _ *))
 val dailyStatisticsDf = unionDf
   .groupBy("creationDate")
   .agg(
@@ -104,21 +93,24 @@ val dailyStatisticsDf = unionDf
   count("answerId").alias("number_of_answers")
 )
 
-dbutils.fs.rm("/FileStore/tables/daily.parquet", true) 
-dailyStatisticsDf.write.parquet("/FileStore/tables/daily.parquet")
+dailyStatisticsDf.write.mode(SaveMode.Overwrite).parquet("/FileStore/tables/daily.parquet")
 dailyStatisticsDf.show()
 
 // COMMAND ----------
 
-def countMeanAndMedianOfAnswerScores(dataset: Dataset[Answer], predicate: Answer => Boolean): (Double, Double) = {
-    val mean = dataset
+def countMean(dataset: Dataset[Answer], predicate: Answer => Boolean): Double = {
+  return  dataset
       .filter(predicate)
       .select(avg("score"))
-      .take(1)(0)(0).toString().toDouble
+      .first.getDouble(0)
+}
 
-    val median = dataset.filter(predicate).stat.approxQuantile("score", Array(0.5), 0.1)(0)
+def countMedian(dataset: Dataset[Answer], predicate: Answer => Boolean): Double = {
+ return dataset.filter(predicate).stat.approxQuantile("score", Array(0.5), 0.1)(0) 
+}
 
-    (mean, median)
+def countMeanAndMedianOfAnswerScores(dataset: Dataset[Answer], predicate: Answer => Boolean): (Double, Double) = {
+ return (countMean(dataset, predicate), countMedian(dataset, predicate))
 }
 
 // COMMAND ----------
@@ -128,7 +120,13 @@ def countMeanAndMedianOfAnswerScores(dataset: Dataset[Answer], predicate: Answer
 
 // COMMAND ----------
 
-val containsLink = (a: Answer) => !Jsoup.parse(a.body).select("a[href]").isEmpty
+def extractLinkBody(html: String): Elements = {
+  Jsoup.parse(html).select("a[href]")
+}
+
+// COMMAND ----------
+
+val containsLink = (a: Answer) => !extractLinkBody(a.body).isEmpty
 println(countMeanAndMedianOfAnswerScores(answersDs,containsLink(_)))
 println(countMeanAndMedianOfAnswerScores(answersDs, !containsLink(_)))
 
@@ -139,9 +137,15 @@ println(countMeanAndMedianOfAnswerScores(answersDs, !containsLink(_)))
 
 // COMMAND ----------
 
-val containsLink = (a: Answer) => !Jsoup.parse(a.body).select("code").isEmpty
-println(countMeanAndMedianOfAnswerScores(answersDs,containsLink(_)))
-println(countMeanAndMedianOfAnswerScores(answersDs, !containsLink(_)))
+def extractCodeBody(html: String): Elements = {
+    Jsoup.parse(html).select("pre").select("code")
+}
+
+// COMMAND ----------
+
+val containsCode = (a: Answer) => !extractCodeBody(a.body).isEmpty
+println(countMeanAndMedianOfAnswerScores(answersDs,containsCode(_)))
+println(countMeanAndMedianOfAnswerScores(answersDs, !containsCode(_)))
 
 // COMMAND ----------
 
@@ -151,11 +155,14 @@ println(countMeanAndMedianOfAnswerScores(answersDs, !containsLink(_)))
 // COMMAND ----------
 
 // MAGIC %md
-// MAGIC Распределение по графику похоже на геометрическое, в котором p --- вероятность, того, что user закончит вводить код(включая "не начинание ввода"). Проверка гипотезы будет добавлена 
+// MAGIC Распределение по графику похоже на геометрическое, в котором p --- вероятность, того, что user закончит вводить код(включая "не начинание ввода").
 
 // COMMAND ----------
 
-val codeLengthProvider: (String => Int) = Jsoup.parse(_).select("code").html.length
+val codeLengthProvider: (String => Int) = extractCodeBody(_).html.split("\\r\\n|\\r|\\n").length
+
+// COMMAND ----------
+
 val codeLenDf = answersDs.select(col("body"))
   .unionAll(questionsDs.select(col("body")))
   .map(r => codeLengthProvider(r(0).toString))
@@ -170,12 +177,12 @@ display(codeLenDf)
 
 // COMMAND ----------
 
+val codeLenUdf = udf(codeLengthProvider)
 val codeLenScoreDf = answersDs
-    .map(a => (a.score, Jsoup.parse(a.body).select("code").html.length))
-    .select(col("_1").alias("score"), col("_2").alias("length"))
-
-display(codeLenScoreDf)
-      
+    .withColumn("len", codeLenUdf($"body"))
+    .select("score", "len")
+    
+display(codeLenScoreDf)  
 
 // COMMAND ----------
 
@@ -189,6 +196,7 @@ val majorTopics = tagsDs
       .agg(count("id").alias("amount"))
       .orderBy(desc("amount"))
       .limit(100)
+      .cache
 
 majorTopics.show()
 
@@ -205,14 +213,13 @@ val totalTopicScoreDf = majorTopics
       .groupBy("tag", "ownerUserId")
       .agg(sum("score").alias("total_score"))
 
-totalTopicScoreDf
-  .groupBy("tag")
-  .agg(max("total_score").alias("total_score"))
-  .join(totalTopicScoreDf, Seq("tag", "total_score"), "inner")
-  .orderBy(desc("total_score"))
-  .limit(100)
-  .show()
-
+val overTag = Window.partitionBy($"tag").orderBy($"total_score".desc)
+val ranked = totalTopicScoreDf.withColumn("rank", dense_rank.over(overTag))
+ranked
+    .select("tag", "total_score", "ownerUserId")
+    .where($"rank" <= 1)
+    .orderBy(desc("total_score"))
+    .show()
 
 // COMMAND ----------
 
@@ -221,24 +228,19 @@ totalTopicScoreDf
 
 // COMMAND ----------
 
+val extractLinkUdf = udf((b: String) => extractLinkBody(b).html)
 answersDs
-   .filter(a => !Jsoup.parse(a.body).select("a[href]").isEmpty)
-   .map(a => {
-   try {
-     val url = Jsoup.parse(a.body).select("a[href]").html
-     new URI(url).getHost
-     }  catch {
-       case ex: URISyntaxException => null
-     }
-   })
-   .na
-   .drop("all")
-   .select(col("value").alias("host"))
-   .groupBy("host")
-   .agg(count("*").alias("amount_of_references"))
-   .orderBy(desc("amount_of_references"))
-   .limit(100)
-   .show()
+  .filter(containsLink)
+  .na.drop("all")
+  .withColumn("link", extractLinkUdf($"body"))
+  .withColumn("host", callUDF("parse_url", $"link", lit("HOST")))
+  .select("host")
+  .na.drop("all")
+  .groupBy("host")
+  .agg(count("*").alias("amount_of_references"))
+  .orderBy(desc("amount_of_references"))
+  .limit(100)
+  .show()
 
 // COMMAND ----------
 
@@ -247,13 +249,15 @@ answersDs
 
 // COMMAND ----------
 
-val selectCols = Seq($"id", year($"creationDate").alias("year"))
-questionsDs
-  .select(selectCols: _*)
-  .union(answersDs.select(selectCols: _*))
-  .groupBy("year")
-  .agg(count("*").alias("amount_of_questions_answers"))
-  .show()
+val selectCols = Seq($"score", month($"creationDate").alias("month"))
+val seasonalityDf = questionsDs
+      .select(selectCols: _*)
+      .union(answersDs.select(selectCols: _*))
+      .groupBy("month")
+      .agg(mean("score"))
+      .orderBy("month")
+
+display(seasonalityDf)
 
 // COMMAND ----------
 
