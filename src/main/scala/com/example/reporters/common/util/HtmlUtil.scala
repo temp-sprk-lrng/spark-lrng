@@ -1,4 +1,4 @@
-package com.example.reporters.util
+package com.example.reporters.common.util
 
 import org.jsoup.Jsoup
 import org.jsoup.select.Elements

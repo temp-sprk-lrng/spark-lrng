@@ -1,6 +1,7 @@
 package com.example.reporters
 
 import com.example.model.{Answer, Question}
+import com.example.reporters.common.{DfLogReporter, ReportDfUnit}
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.functions._
 
@@ -8,7 +9,7 @@ case class SeasonalityReporter(questionsDs: Dataset[Question], answersDs: Datase
 
   import com.example.session.SparkSessionHolder.spark.implicits._
 
-  override val reportData: Seq[ReportDfUnit] = {
+  override val reportData: ReportDfUnit = {
     val selectCols = Seq($"score", month($"creationDate").alias("month"))
     val seasonalityDf = questionsDs
       .select(selectCols: _*)
@@ -18,6 +19,6 @@ case class SeasonalityReporter(questionsDs: Dataset[Question], answersDs: Datase
       .orderBy("month")
       .withColumnRenamed("avg(score)", "avg")
 
-    Seq(ReportDfUnit(seasonalityDf, "seasonality"))
+    common.ReportDfUnit(seasonalityDf, "seasonality")
   }
 }

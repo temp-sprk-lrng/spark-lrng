@@ -1,24 +1,19 @@
 package com.example.reporters
 
 import com.example.model.{Answer, Question, Tag}
+import com.example.reporters.common.{DfLogReporter, ReportDfUnit}
 import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.{DataFrame, Dataset, Row}
 
-case class TopTopicsReporter(questionsDs: Dataset[Question],
-                             answersDs: Dataset[Answer],
-                             tagsDs: Dataset[Tag]) extends DfLogReporter {
+case class ExpertsReporter(questionsDs: Dataset[Question],
+                           answersDs: Dataset[Answer],
+                           tagsDs: Dataset[Tag],
+                           majorTopics: DataFrame) extends DfLogReporter {
 
   import com.example.session.SparkSessionHolder.spark.implicits._
 
-  override val reportData: Seq[ReportDfUnit] = {
-    val majorTopics = getMajorTopics
-    val experts = getExperts(majorTopics)
-    Seq(
-      ReportDfUnit(majorTopics, "majot_topics"),
-      ReportDfUnit(experts, "experts")
-    )
-  }
+  override val reportData: ReportDfUnit = common.ReportDfUnit(getExperts(majorTopics), "experts")
 
   private def getExperts(majorTopics: DataFrame) = {
     val overTag = Window.partitionBy($"tag").orderBy($"total_score".desc)
@@ -37,12 +32,6 @@ case class TopTopicsReporter(questionsDs: Dataset[Question],
       .agg(sum("score").alias("total_score"))
   }
 
-  private def getMajorTopics = {
-    tagsDs
-      .groupBy("tag")
-      .agg(count("id").alias("amount"))
-      .orderBy(desc("amount"))
-      .limit(100)
-      .cache
-  }
 }
+
+

@@ -3,6 +3,7 @@ package com.example.reporters
 import java.net.{URI, URISyntaxException}
 
 import com.example.model.Answer
+import com.example.reporters.common.{DfLogReporter, ReportDfUnit}
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.functions._
 import org.jsoup.Jsoup
@@ -11,7 +12,7 @@ case class QuotedReporter(answersDs: Dataset[Answer], limit: Int) extends DfLogR
 
   import com.example.session.SparkSessionHolder.spark.implicits._;
 
-  override val reportData: Seq[ReportDfUnit] = {
+  override val reportData: ReportDfUnit = {
     val topQuoteDf = answersDs
       .filter(a => !Jsoup.parse(a.body).select("a[href]").isEmpty)
       .map(a => {
@@ -30,7 +31,7 @@ case class QuotedReporter(answersDs: Dataset[Answer], limit: Int) extends DfLogR
       .orderBy(desc("amount_of_references"))
       .limit(limit)
 
-    Seq(ReportDfUnit(topQuoteDf, "top_quote"))
+    common.ReportDfUnit(topQuoteDf, "top_quote")
   }
 
 }

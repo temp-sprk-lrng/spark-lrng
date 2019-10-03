@@ -1,4 +1,4 @@
-package com.example.reporters
+package com.example.reporters.common
 
 import org.apache.spark.sql.DataFrame
 

@@ -1,6 +1,7 @@
 package com.example.reporters
 
 import com.example.model.{Answer, Question}
+import com.example.reporters.common.{DfLogReporter, ReportDfUnit}
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.DateType
@@ -11,7 +12,7 @@ case class DailyStatisticsReporter(questionsDs: Dataset[Question],
 
   import com.example.session.SparkSessionHolder.spark.implicits._
 
-  val reportData: Seq[ReportDfUnit] = {
+  val reportData: ReportDfUnit = {
     val questionNaFreeDs = questionsDs
       .withColumn("creationDate", $"creationDate".cast(DateType))
       .na.drop(Seq("creationDate"))
@@ -40,6 +41,6 @@ case class DailyStatisticsReporter(questionsDs: Dataset[Question],
         count("answerId").alias("number_of_answers")
       )
 
-    Seq(ReportDfUnit(dailyStatisticsDf, "daily_statistics"))
+    common.ReportDfUnit(dailyStatisticsDf, "daily_statistics")
   }
 }
