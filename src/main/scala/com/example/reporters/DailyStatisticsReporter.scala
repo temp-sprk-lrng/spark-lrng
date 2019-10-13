@@ -1,18 +1,17 @@
 package com.example.reporters
 
 import com.example.model.{Answer, Question}
-import com.example.reporters.common.{DfLogReporter, ReportDfUnit}
+import com.example.reporters.common.{Reporter, ReportUnit}
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.DateType
 
-
 case class DailyStatisticsReporter(questionsDs: Dataset[Question],
-                                   answersDs: Dataset[Answer]) extends DfLogReporter {
+                                   answersDs: Dataset[Answer]) extends Reporter {
 
   import com.example.session.SparkSessionHolder.spark.implicits._
 
-  val reportData: ReportDfUnit = {
+  val reportData: ReportUnit = {
     val questionNaFreeDs = questionsDs
       .withColumn("creationDate", $"creationDate".cast(DateType))
       .na.drop(Seq("creationDate"))
@@ -41,6 +40,6 @@ case class DailyStatisticsReporter(questionsDs: Dataset[Question],
         count("answerId").alias("number_of_answers")
       )
 
-    common.ReportDfUnit(dailyStatisticsDf, "daily_statistics")
+    common.ReportUnit(dailyStatisticsDf, "daily_statistics")
   }
 }

@@ -1,3 +1,5 @@
 package com.example.reporters.common
 
-case class ReportUnit(result: String, name: String)
+import org.apache.spark.sql.DataFrame
+
+case class ReportUnit(df: DataFrame, name: String)

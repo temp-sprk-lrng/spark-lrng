@@ -1,39 +1,53 @@
 package com.example
 
+import com.example.analytics.AnswerScoreModel
 import com.example.extractor.Extractor
-import com.example.model.{Answer, Question, Tag}
-import com.example.reporters.common.util.HtmlUtil
-import com.example.reporters.{AverageScoreReporter, CodeLenReporter, DailyStatisticsReporter, ExpertsReporter, MajorTopicsReporter, QuotedReporter, SeasonalityReporter}
+import com.example.model.{Answer, Question}
 import com.example.session.SparkSessionHolder
+import com.example.util.CommonUtil
+import org.apache.log4j.Logger
+import org.apache.spark.ml.evaluation.RegressionEvaluator
+import org.apache.spark.ml.regression.{GBTRegressor, LinearRegression}
+import org.apache.spark.ml.tuning.{CrossValidatorModel, ParamGridBuilder}
+import org.apache.spark.sql.DataFrame
 
-object App extends App {
+object App {
+  private val log = Logger.getLogger(App.getClass)
 
-  val accessKeyId = System.getenv("AWS_ACCESS_KEY_ID")
-  val secretAccessKey = System.getenv("AWS_SECRET_ACCESS_KEY")
+  def init(args: Array[String]): Unit = {
+    CommonUtil.baseFileLocation(args(0))
+    SparkSessionHolder.init(args(1), args(2))
+  }
 
-  SparkSessionHolder.spark.sparkContext.hadoopConfiguration.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-  SparkSessionHolder.spark.sparkContext.hadoopConfiguration.set("fs.s3a.awsAccessKeyId", accessKeyId)
-  SparkSessionHolder.spark.sparkContext.hadoopConfiguration.set("fs.s3a.awsSecretAccessKey", secretAccessKey)
+  def logModelMetrics(model: CrossValidatorModel, testData: DataFrame): Unit = {
+    val predictions = model.transform(testData)
+    val rmse = new RegressionEvaluator().setMetricName("rmse").evaluate(predictions)
+    val mae = new RegressionEvaluator().setMetricName("mae").evaluate(predictions)
 
-  val questionsDs = Extractor.readCsv[Question]("s3a://spark-lrng-d.sei/data/Questions.csv")
-  val answersDs = Extractor.readCsv[Answer]("s3a://spark-lrng-d.sei/data/Answers.csv")
-  val tagsDs = Extractor.readCsv[Tag]("s3a://spark-lrng-d.sei/data/Tags.csv")
+    log.info("**********************************")
+    log.info(s"rmse: $rmse")
+    log.info(s"mae: $mae")
+    log.info("**********************************")
+  }
 
-  val majorTopicsReporter = MajorTopicsReporter(tagsDs)
-  val expertsReporter = ExpertsReporter(questionsDs, answersDs, tagsDs, majorTopicsReporter.reportData.df)
-  val reporters = Seq(
-    DailyStatisticsReporter(questionsDs, answersDs),
-    AverageScoreReporter(answersDs, (a: Answer) => HtmlUtil.containsLinks(a.body), "avg_contains_link_score"),
-    AverageScoreReporter(answersDs, (a: Answer) => !HtmlUtil.containsLinks(a.body), "avg_not_contains_link_score"),
-    AverageScoreReporter(answersDs, (a: Answer) => HtmlUtil.containsCode(a.body), "avg_contains_code_score"),
-    AverageScoreReporter(answersDs, (a: Answer) => !HtmlUtil.containsCode(a.body), "avg_not_contains_code_score"),
-    CodeLenReporter(answersDs, questionsDs),
-    majorTopicsReporter,
-    expertsReporter,
-    QuotedReporter(answersDs, 100),
-    SeasonalityReporter(questionsDs, answersDs)
-  )
+  def main(args: Array[String]): Unit = {
+    init(args)
+    val answersDs = Extractor.readCsv[Answer]("Answers.csv")
+    val questionsDs = Extractor.readCsv[Question]("Questions.csv")
 
-  reporters.foreach(_.report)
+    val data = AnswerScoreModel.transformData(answersDs, questionsDs)
+    val Array(train, test) = data.randomSplit(Array(.8, .2))
 
+    val linearRegression = new LinearRegression()
+    val linearParams = new ParamGridBuilder().addGrid(linearRegression.elasticNetParam, Array(0.3, 0.6, 0.8)).build()
+    val linearModel = AnswerScoreModel.model(train, linearParams, linearRegression)
+
+
+    val gbtRegressor = new GBTRegressor()
+    val gbtParams = new ParamGridBuilder().addGrid(gbtRegressor.featureSubsetStrategy, Array("auto", "all")).build()
+    val gbtModel = AnswerScoreModel.model(train, gbtParams, gbtRegressor)
+
+    logModelMetrics(linearModel, test)
+    logModelMetrics(gbtModel, test)
+  }
 }
