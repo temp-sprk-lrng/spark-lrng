@@ -3,26 +3,19 @@ package com.example.reporters
 import java.net.{URI, URISyntaxException}
 
 import com.example.model.Answer
-import com.example.reporters.common.{DfLogReporter, ReportDfUnit}
+import com.example.reporters.common.{ReportUnit, Reporter}
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.functions._
 import org.jsoup.Jsoup
 
-case class QuotedReporter(answersDs: Dataset[Answer], limit: Int) extends DfLogReporter {
+case class QuotedReporter(answersDs: Dataset[Answer], limit: Int) extends Reporter {
 
   import com.example.session.SparkSessionHolder.spark.implicits._;
 
-  override val reportData: ReportDfUnit = {
+  override val reportData: ReportUnit = {
     val topQuoteDf = answersDs
       .filter(a => !Jsoup.parse(a.body).select("a[href]").isEmpty)
-      .map(a => {
-        try {
-          val url = Jsoup.parse(a.body).select("a[href]").html
-          new URI(url).getHost
-        } catch {
-          case ex: URISyntaxException => null
-        }
-      })
+      .map(getHost)
       .na
       .drop("all")
       .select(col("value").alias("host"))
@@ -31,7 +24,15 @@ case class QuotedReporter(answersDs: Dataset[Answer], limit: Int) extends DfLogR
       .orderBy(desc("amount_of_references"))
       .limit(limit)
 
-    common.ReportDfUnit(topQuoteDf, "top_quote")
+    common.ReportUnit(topQuoteDf, "top_quote")
   }
 
+  private def getHost(a: Answer) = {
+    try {
+      val url = Jsoup.parse(a.body).select("a[href]").html
+      new URI(url).getHost
+    } catch {
+      case _: URISyntaxException => null
+    }
+  }
 }
