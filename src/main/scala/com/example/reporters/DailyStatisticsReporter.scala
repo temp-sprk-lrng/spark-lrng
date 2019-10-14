@@ -6,7 +6,6 @@ import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.DateType
 
-
 case class DailyStatisticsReporter(questionsDs: Dataset[Question],
                                    answersDs: Dataset[Answer]) extends Reporter {
 
