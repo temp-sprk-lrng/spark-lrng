@@ -1,12 +1,12 @@
-package com.example.extractor
+package com.example.etl.common.util
 
 import com.example.session.SparkSessionHolder
 import com.example.util.CommonUtil
-import org.apache.spark.sql.{Dataset, Encoders}
+import org.apache.spark.sql.{DataFrame, Dataset, Encoders, SaveMode}
 
 import scala.reflect.runtime.universe
 
-object Extractor {
+object EtlUtil {
   def readCsv[T <: Product : universe.TypeTag](filename: String): Dataset[T] = {
     import SparkSessionHolder.spark.implicits._
 
@@ -18,8 +18,11 @@ object Extractor {
       .csv(CommonUtil.baseFileLocation + "/data/" + filename)
       .na.drop("any")
       .as[T]
+      .limit(100)
       .cache
   }
+
+  def writeToS3(df: DataFrame, filename: String) = {
+    df.write.mode(SaveMode.Overwrite).parquet(CommonUtil.baseFileLocation + "/out/" + filename)
+  }
 }
-
-

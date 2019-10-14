@@ -1,19 +1,20 @@
-package com.example.reporters
+package com.example.etl
 
 import java.net.{URI, URISyntaxException}
 
 import com.example.model.Answer
-import com.example.reporters.common.{ReportUnit, Reporter}
-import org.apache.spark.sql.Dataset
+import com.example.etl.common.Transformer
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.{DataFrame, Dataset}
 import org.jsoup.Jsoup
 
-case class QuotedReporter(answersDs: Dataset[Answer], limit: Int) extends Reporter {
+case class QuotedTransformer(limit: Int) extends Transformer[Answer] {
 
   import com.example.session.SparkSessionHolder.spark.implicits._;
 
-  override val reportData: ReportUnit = {
-    val topQuoteDf = answersDs
+
+  override def transform(answersDs: Dataset[Answer]): DataFrame = {
+    answersDs
       .filter(a => !Jsoup.parse(a.body).select("a[href]").isEmpty)
       .map(getHost)
       .na
@@ -23,8 +24,6 @@ case class QuotedReporter(answersDs: Dataset[Answer], limit: Int) extends Report
       .agg(count("*").alias("amount_of_references"))
       .orderBy(desc("amount_of_references"))
       .limit(limit)
-
-    common.ReportUnit(topQuoteDf, "top_quote")
   }
 
   private def getHost(a: Answer) = {

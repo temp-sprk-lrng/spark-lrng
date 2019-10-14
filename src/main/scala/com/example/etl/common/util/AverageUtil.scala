@@ -1,4 +1,4 @@
-package com.example.reporters.common.util
+package com.example.etl.common.util
 
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.functions.avg

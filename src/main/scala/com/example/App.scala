@@ -1,9 +1,9 @@
 package com.example
 
-import com.example.extractor.Extractor
+import com.example.etl._
+import com.example.etl.common.util.{EtlUtil, HtmlUtil}
+import com.example.etl.defenition.{EtlBiDefinition, EtlDefinition, EtlTriDefinition}
 import com.example.model.{Answer, Question, Tag}
-import com.example.reporters._
-import com.example.reporters.common.util.HtmlUtil
 import com.example.session.SparkSessionHolder
 import com.example.util.CommonUtil
 
@@ -16,25 +16,55 @@ object App {
   def main(args: Array[String]): Unit = {
     init(args)
 
-    val questionsDs = Extractor.readCsv[Question]("Questions.csv")
-    val answersDs = Extractor.readCsv[Answer]("Answers.csv")
-    val tagsDs = Extractor.readCsv[Tag]("Tags.csv")
+    val questionsDs = EtlUtil.readCsv[Question]("Questions.csv")
+    val answersDs = EtlUtil.readCsv[Answer]("Answers.csv")
+    val tagsDs = EtlUtil.readCsv[Tag]("Tags.csv")
 
-    val majorTopicsReporter = MajorTopicsReporter(tagsDs, 100)
-    val expertsReporter = ExpertsReporter(questionsDs, answersDs, tagsDs, majorTopicsReporter.reportData.df)
+    val majorTopicsEtl =  EtlDefinition(
+      sourceDF = tagsDs,
+      transform = MajorTopicsTransformer(100).transform,
+      write = df => EtlUtil.writeToS3(df, "major_topics")
+    )
+    val majorTopicsDf = majorTopicsEtl.transform(majorTopicsEtl.sourceDF)
+    majorTopicsEtl.write(majorTopicsDf);
+
     val reporters = Seq(
-      DailyStatisticsReporter(questionsDs, answersDs),
-      AverageScoreReporter(answersDs, (a: Answer) => HtmlUtil.containsLinks(a.body), "avg_contains_link_score"),
-      AverageScoreReporter(answersDs, (a: Answer) => !HtmlUtil.containsLinks(a.body), "avg_not_contains_link_score"),
-      AverageScoreReporter(answersDs, (a: Answer) => HtmlUtil.containsCode(a.body), "avg_contains_code_score"),
-      AverageScoreReporter(answersDs, (a: Answer) => !HtmlUtil.containsCode(a.body), "avg_not_contains_code_score"),
-      CodeLenReporter(answersDs, questionsDs),
-      majorTopicsReporter,
-      expertsReporter,
-      QuotedReporter(answersDs, 100),
-      SeasonalityReporter(questionsDs, answersDs)
+      EtlBiDefinition(
+        sourceDf1 = questionsDs,
+        sourceDf2 = answersDs,
+        transformer = DailyStatisticsTransformer.transform,
+        write = df => EtlUtil.writeToS3(df, "daily_statistics")
+      ),
+      EtlDefinition(
+        sourceDF = answersDs,
+        transform = AverageScoreTransformer((a: Answer) => HtmlUtil.containsLinks(a.body)).transform,
+        write = df => EtlUtil.writeToS3(df, "avg_score_with_hrefs")
+      ),
+      EtlDefinition(
+        sourceDF = answersDs,
+        transform = AverageScoreTransformer((a: Answer) => !HtmlUtil.containsLinks(a.body)).transform,
+        write = df => EtlUtil.writeToS3(df, "avg_score_without_hrefs")
+      ),
+      EtlDefinition(
+        sourceDF = answersDs,
+        transform = AverageScoreTransformer((a: Answer) => HtmlUtil.containsCode(a.body)).transform,
+        write = df => EtlUtil.writeToS3(df, "avg_score_with_code")
+      ),
+      EtlDefinition(
+        sourceDF = answersDs,
+        transform = AverageScoreTransformer((a: Answer) => !HtmlUtil.containsCode(a.body)).transform,
+        write = df => EtlUtil.writeToS3(df, "avg_score_without_code")
+      ),
+      EtlTriDefinition(
+        sourceDF1 = questionsDs,
+        sourceDF2 = answersDs,
+        sourceDF3 = tagsDs,
+        transformer = ExpertsTransformer(majorTopicsDf).transform,
+        write =  df => EtlUtil.writeToS3(df, "experts")
+      )
+
     )
 
-    reporters.foreach(_.report)
+    reporters.foreach(_.process())
   }
 }

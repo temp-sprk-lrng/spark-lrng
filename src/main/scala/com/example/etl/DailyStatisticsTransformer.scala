@@ -1,18 +1,15 @@
-package com.example.reporters
+package com.example.etl
 
 import com.example.model.{Answer, Question}
-import com.example.reporters.common.{Reporter, ReportUnit}
-import org.apache.spark.sql.Dataset
+import com.example.etl.common.BiTransformer
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.DateType
+import org.apache.spark.sql.{DataFrame, Dataset}
 
+object DailyStatisticsTransformer extends BiTransformer[Question, Answer] {
 
-case class DailyStatisticsReporter(questionsDs: Dataset[Question],
-                                   answersDs: Dataset[Answer]) extends Reporter {
-
-  import com.example.session.SparkSessionHolder.spark.implicits._
-
-  val reportData: ReportUnit = {
+  override def transform(questionsDs: Dataset[Question], answersDs: Dataset[Answer]): DataFrame = {
+    import com.example.session.SparkSessionHolder.spark.implicits._
     val questionNaFreeDs = questionsDs
       .withColumn("creationDate", $"creationDate".cast(DateType))
       .na.drop(Seq("creationDate"))
@@ -33,14 +30,12 @@ case class DailyStatisticsReporter(questionsDs: Dataset[Question],
       lit(null).alias("questionId")
     )
     val unionDf = questionNaFreeDs.select(questionCols: _*).unionByName(answersNaFreeDs.select(answerCols: _ *))
-    val dailyStatisticsDf = unionDf
+    unionDf
       .groupBy("creationDate")
       .agg(
         countDistinct("ownerUserId").alias("unique_users"),
         count("questionId").alias("number_of_questions"),
         count("answerId").alias("number_of_answers")
       )
-
-    common.ReportUnit(dailyStatisticsDf, "daily_statistics")
   }
 }
