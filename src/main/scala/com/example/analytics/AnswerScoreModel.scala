@@ -4,7 +4,8 @@ import com.example.model.{Answer, Question}
 import com.example.reporters.common.util.HtmlUtil
 import org.apache.spark.ml.evaluation.RegressionEvaluator
 import org.apache.spark.ml.feature.{StopWordsRemover, Tokenizer, VectorAssembler, Word2Vec}
-import org.apache.spark.ml.tuning.{CrossValidator, CrossValidatorModel, ParamGridBuilder}
+import org.apache.spark.ml.param.ParamMap
+import org.apache.spark.ml.tuning.CrossValidator
 import org.apache.spark.ml.{Pipeline, PipelineStage}
 import org.apache.spark.sql.functions.udf
 import org.apache.spark.sql.{DataFrame, Dataset}
@@ -31,8 +32,8 @@ object AnswerScoreModel {
   }
 
   def model(train: DataFrame,
-            regressor: PipelineStage,
-            gridBuilderUpdater: ParamGridBuilder => Unit): CrossValidatorModel = {
+            params: Array[ParamMap],
+            regressor: PipelineStage) = {
     val tokenized = new Tokenizer().setInputCol("body").setOutputCol("tokenized")
 
     val stopWordFree = new StopWordsRemover()
@@ -40,7 +41,7 @@ object AnswerScoreModel {
       .setInputCol("tokenized")
       .setOutputCol("free")
 
-    val word2vec = new Word2Vec().setInputCol("free").setOutputCol("word2vec")
+    val word2vec = new Word2Vec().setInputCol("free").setOutputCol("word2vec").setVectorSize(10)
 
     val assembler = new VectorAssembler()
       .setInputCols(Array("contains_link", "code_len", "question_score", "word2vec"))
@@ -54,14 +55,11 @@ object AnswerScoreModel {
       .setPredictionCol("prediction")
       .setMetricName("rmse")
 
-    val paramGridBuilder = new ParamGridBuilder()
-      .addGrid(word2vec.vectorSize, Array(50, 100, 200))
-    gridBuilderUpdater.apply(paramGridBuilder)
 
     val cv = new CrossValidator()
       .setEstimator(pipeline)
       .setEvaluator(rmseEvaluator)
-      .setEstimatorParamMaps(paramGridBuilder.build())
+      .setEstimatorParamMaps(params)
 
     cv.fit(train)
   }
