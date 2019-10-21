@@ -13,4 +13,6 @@ object HtmlUtil {
   def containsCode(html: String): Boolean = !extractCodeBody(html).isEmpty
 
   def codeLen(html: String): Int = extractCodeBody(html).html.split("\\r\\n|\\r|\\n").length
+
+  def tagFreeBody(html: String): String = Jsoup.parse(html).text
 }
